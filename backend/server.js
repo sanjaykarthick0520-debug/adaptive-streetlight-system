@@ -4,27 +4,34 @@ const sql = require("./db");
 
 const app = express();
 
-app.use(cors());
+// ✅ Allow Vercel frontend
+app.use(cors({
+    origin: "*", // later you can restrict to your Vercel URL
+}));
+
 app.use(express.json());
 
-app.get("/streetlights", async (req, res) => {
-
-    try{
-        const result = await sql.query("SELECT * FROM Streetlights");
-        res.json(result.recordset);
-    }
-    catch(err){
-        res.send(err);
-    }
-
+// ✅ Health check route (important for Render)
+app.get("/", (req, res) => {
+    res.send("Backend is running 🚀");
 });
 
-app.post("/streetlights", async (req,res)=>{
+// ✅ GET all streetlights
+app.get("/streetlights", async (req, res) => {
+    try {
+        const result = await sql.query("SELECT * FROM Streetlights");
+        res.json(result.recordset);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Error fetching data" });
+    }
+});
 
-    const {location} = req.body;
+// ✅ ADD streetlight
+app.post("/streetlights", async (req, res) => {
+    const { location } = req.body;
 
-    try{
-
+    try {
         await sql.query`
         INSERT INTO Streetlights
         (location, ambient_light, traffic_density, brightness, energy_usage, status)
@@ -32,32 +39,30 @@ app.post("/streetlights", async (req,res)=>{
         (${location},50,20,40,32,'Active')
         `;
 
-        res.send("Streetlight added");
+        res.json({ message: "Streetlight added" });
 
-    }catch(err){
-        res.send(err);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Insert failed" });
     }
-
 });
 
-app.put("/streetlights/:id", async (req,res)=>{
-
+// ✅ UPDATE streetlight
+app.put("/streetlights/:id", async (req, res) => {
     const id = req.params.id;
-    const {ambient_light,traffic_density} = req.body;
+    const { ambient_light, traffic_density } = req.body;
 
     let brightness = 40;
 
-    if(ambient_light < 30 && traffic_density > 50){
+    if (ambient_light < 30 && traffic_density > 50) {
         brightness = 100;
-    }
-    else if(ambient_light < 50){
+    } else if (ambient_light < 50) {
         brightness = 70;
     }
 
     const energy = brightness * 0.8;
 
-    try{
-
+    try {
         await sql.query`
         UPDATE Streetlights
         SET ambient_light=${ambient_light},
@@ -67,14 +72,17 @@ app.put("/streetlights/:id", async (req,res)=>{
         WHERE id=${id}
         `;
 
-        res.send("Streetlight updated");
+        res.json({ message: "Streetlight updated" });
 
-    }catch(err){
-        res.send(err);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Update failed" });
     }
-
 });
 
-app.listen(5000,()=>{
-    console.log("Server running on port 5000");
+// ✅ IMPORTANT: Dynamic PORT (Render requirement)
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
