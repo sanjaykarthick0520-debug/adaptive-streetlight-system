@@ -1,88 +1,77 @@
 const express = require("express");
 const cors = require("cors");
-const sql = require("./db");
+const mongoose = require("mongoose");
 
 const app = express();
 
-// ✅ Allow Vercel frontend
-app.use(cors({
-    origin: "*", // later you can restrict to your Vercel URL
-}));
-
+app.use(cors());
 app.use(express.json());
 
-// ✅ Health check route (important for Render)
+// ✅ Connect MongoDB
+mongoose.connect(process.env.MONGO_URI)
+.then(() => console.log("MongoDB Connected 🚀"))
+.catch(err => console.log(err));
+
+// ✅ Schema
+const streetlightSchema = new mongoose.Schema({
+  location: String,
+  ambient_light: Number,
+  traffic_density: Number,
+  brightness: Number,
+  energy_usage: Number,
+  status: String
+});
+
+const Streetlight = mongoose.model("Streetlight", streetlightSchema);
+
+// ✅ Test route
 app.get("/", (req, res) => {
-    res.send("Backend is running 🚀");
+  res.send("Backend running 🚀");
 });
 
-// ✅ GET all streetlights
+// ✅ GET
 app.get("/streetlights", async (req, res) => {
-    try {
-        const result = await sql.query("SELECT * FROM Streetlights");
-        res.json(result.recordset);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Error fetching data" });
-    }
+  const data = await Streetlight.find();
+  res.json(data);
 });
 
-// ✅ ADD streetlight
+// ✅ POST
 app.post("/streetlights", async (req, res) => {
-    const { location } = req.body;
+  const { location } = req.body;
 
-    try {
-        await sql.query`
-        INSERT INTO Streetlights
-        (location, ambient_light, traffic_density, brightness, energy_usage, status)
-        VALUES
-        (${location},50,20,40,32,'Active')
-        `;
+  const newLight = new Streetlight({
+    location,
+    ambient_light: 50,
+    traffic_density: 20,
+    brightness: 40,
+    energy_usage: 32,
+    status: "Active"
+  });
 
-        res.json({ message: "Streetlight added" });
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Insert failed" });
-    }
+  await newLight.save();
+  res.json({ message: "Added" });
 });
 
-// ✅ UPDATE streetlight
+// ✅ PUT
 app.put("/streetlights/:id", async (req, res) => {
-    const id = req.params.id;
-    const { ambient_light, traffic_density } = req.body;
+  const { ambient_light, traffic_density } = req.body;
 
-    let brightness = 40;
+  let brightness = 40;
 
-    if (ambient_light < 30 && traffic_density > 50) {
-        brightness = 100;
-    } else if (ambient_light < 50) {
-        brightness = 70;
-    }
+  if (ambient_light < 30 && traffic_density > 50) brightness = 100;
+  else if (ambient_light < 50) brightness = 70;
 
-    const energy = brightness * 0.8;
+  const energy = brightness * 0.8;
 
-    try {
-        await sql.query`
-        UPDATE Streetlights
-        SET ambient_light=${ambient_light},
-            traffic_density=${traffic_density},
-            brightness=${brightness},
-            energy_usage=${energy}
-        WHERE id=${id}
-        `;
+  await Streetlight.findByIdAndUpdate(req.params.id, {
+    ambient_light,
+    traffic_density,
+    brightness,
+    energy_usage: energy
+  });
 
-        res.json({ message: "Streetlight updated" });
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Update failed" });
-    }
+  res.json({ message: "Updated" });
 });
 
-// ✅ IMPORTANT: Dynamic PORT (Render requirement)
 const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
