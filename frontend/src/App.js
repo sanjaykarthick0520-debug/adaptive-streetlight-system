@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import LoginPage from "./LoginPage";
 
+const API_URL = "https://backend-9e28.onrender.com";
+
 // ── STORAGE HELPERS ──
 const load = (k) => { try { return JSON.parse(localStorage.getItem(k)) || []; } catch { return []; } };
 const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
@@ -404,24 +406,102 @@ const Nodes = ({ toast, refresh }) => {
   const [editNode, setEditNode] = useState(null);
   const [form, setForm] = useState({ nodeId: '', zone: '', loc: '', type: '60W LED', status: 'on', bright: 100, sensor: 'PIR + LDR' });
 
-  const zones = load('zones'); const nodes = load('nodes');
+const zones = load('zones');
+const nodes = JSON.parse(localStorage.getItem("nodes")) || [];
   const filtered = nodes.filter(n =>
     (!search || n.nodeId.toLowerCase().includes(search.toLowerCase()) || n.loc.toLowerCase().includes(search.toLowerCase())) &&
     (!filter || n.status === filter)
   );
 
   const openAdd = () => { setEditNode(null); setForm({ nodeId: '', zone: zones[0]?.id || '', loc: '', type: '60W LED', status: 'on', bright: 100, sensor: 'PIR + LDR' }); setModal(true); };
-  const openEdit = (n) => { setEditNode(n.id); setForm({ nodeId: n.nodeId, zone: n.zone, loc: n.loc, type: n.type, status: n.status, bright: n.bright, sensor: n.sensor }); setModal(true); };
+  const openEdit = (n) => { setEditNode(n._id); setForm({ nodeId: n.nodeId, zone: n.zone, loc: n.loc, type: n.type, status: n.status, bright: n.bright, sensor: n.sensor }); setModal(true); };
 
-  const saveNode = () => {
-    if (!form.nodeId || !form.zone || !form.loc) { toast('Fill required fields', 'error'); return; }
-    const ns = load('nodes');
-    if (editNode) { const i = ns.findIndex(n => n.id === editNode); if (i >= 0) ns[i] = { ...ns[i], ...form }; }
-    else { if (ns.find(n => n.nodeId === form.nodeId)) { toast('Node ID already exists', 'error'); return; } ns.push({ id: uid(), ...form }); }
-    save('nodes', ns); setModal(false); toast(`Node ${editNode ? 'updated' : 'added'} ✓`); refresh();
-  };
+  const saveNode = async () => {
+  if (!form.nodeId || !form.zone || !form.loc) {
+    toast('Fill required fields', 'error');
+    return;
+  }
 
-  const deleteNode = (id) => { if (!window.confirm('Delete this node?')) return; const ns = load('nodes').filter(n => n.id !== id); save('nodes', ns); toast('Node removed'); refresh(); };
+  try {
+    let res;
+
+    if (editNode) {
+      // ✏️ UPDATE NODE
+      res = await fetch(`${API_URL}/streetlights/${editNode}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...form,
+          location: form.loc,
+          brightness: form.bright,
+        }),
+      });
+    } else {
+      // ➕ ADD NODE
+      res = await fetch(`${API_URL}/streetlights`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...form,
+          location: form.loc,
+          ambient_light: 50,
+          traffic_density: 20,
+          brightness: form.bright,
+          energy_usage: 32,
+          status: "Active"
+        }),
+      });
+    }
+
+    const data = await res.json();
+
+    let ns = load("nodes");
+
+    if (editNode) {
+      ns = ns.map(n => n._id === editNode ? data : n);
+      toast("Node updated ✓");
+    } else {
+      ns.push(data);
+      toast("Node added ✓");
+    }
+
+    save("nodes", ns);
+
+    setModal(false);
+    setEditNode(null);
+    refresh();
+    setTick(t => t + 1);
+
+  } catch (err) {
+    console.error(err);
+    toast("Backend error", "error");
+  }
+};
+
+ const deleteNode = async (id) => {
+  if (!window.confirm('Delete this node?')) return;
+
+  try {
+    await fetch(`${API_URL}/streetlights/${id}`, {
+      method: "DELETE",
+    });
+
+    const ns = load("nodes").filter(n => n._id !== id);
+    save("nodes", ns);
+
+    toast("Node removed ✓");
+    refresh();
+    setTick(t => t + 1);
+
+  } catch (err) {
+    console.error(err);
+    toast("Delete failed", "error");
+  }
+};
   const getZoneName = (id) => zones.find(z => z.id === id)?.name || '—';
   const wattage = (n) => Math.round((parseInt(n.type) || 60) * (n.bright / 100));
 
@@ -1019,15 +1099,44 @@ const Settings = ({ toast, refresh }) => {
 export default function App() {
   const [page, setPage] = useState('dashboard');
   const [clock, setClock] = useState('');
-  const [toast, setToastState] = useState({ msg: '', type: 'success', visible: false });
   const [tick, setTick] = useState(0);
+  const [toast, setToastState] = useState({ msg: '', type: 'success', visible: false });
   const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('sl_session')); } catch { return null; } });
   const toastTimer = useRef(null);
+  const [nodes, setNodes] = useState([]);
 
   const handleLogin = useCallback((u) => { setUser(u); }, []);
   const handleLogout = useCallback(() => { localStorage.removeItem('sl_session'); setUser(null); setPage('dashboard'); }, []);
 
   useEffect(() => { seedIfEmpty(); }, []);
+
+  useEffect(() => {
+  const interval = setInterval(() => {
+    fetch(`${API_URL}/streetlights`)
+      .then(res => res.json())
+      .then(data => {
+        localStorage.setItem("nodes", JSON.stringify(data));
+        setTick(t => t + 1);
+      })
+      .catch(() => {});
+  }, 5000);
+
+  return () => clearInterval(interval);
+}, []);
+
+  useEffect(() => {
+  fetch(`${API_URL}/streetlights`)
+    .then(res => res.json())
+    .then(data => {
+      setNodes(data);
+      localStorage.setItem("nodes", JSON.stringify(data));
+    })
+    .catch(err => {
+      console.error("Backend error:", err);
+      setNodes(load("nodes"));
+    });
+}, []);
+
 
   useEffect(() => {
     const t = setInterval(() => setClock(new Date().toLocaleTimeString('en-IN', { hour12: false })), 1000);
